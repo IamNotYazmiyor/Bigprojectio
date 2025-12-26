@@ -4,23 +4,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lownex Engine - Final Version</title>
+    <title>Lownex Core - Hand Particle Physics</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; }
-        #video-container { position: fixed; bottom: 20px; right: 20px; width: 120px; height: 90px; border: 1px solid #00ffcc; border-radius: 10px; z-index: 100; transform: scaleX(-1); opacity: 0.6; }
-        video { width: 100%; height: 100%; object-fit: cover; }
-        #brand { position: fixed; top: 30px; left: 30px; color: #00ffcc; z-index: 1000; font-family: monospace; }
-        #brand h1 { margin: 0; font-size: 24px; letter-spacing: 8px; text-shadow: 0 0 15px #00ffcc; }
-        #start-btn { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 20px 60px; background: transparent; color: #00ffcc; border: 2px solid #00ffcc; cursor: pointer; z-index: 2000; font-weight: bold; font-size: 18px; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Orbitron', sans-serif; }
+        #video-container { position: fixed; bottom: 20px; right: 20px; width: 140px; height: 105px; border: 2px solid #00ffcc; border-radius: 12px; z-index: 100; transform: scaleX(-1); box-shadow: 0 0 20px rgba(0,255,204,0.5); }
+        video { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
+        #ui-layer { position: fixed; top: 30px; left: 30px; color: #00ffcc; z-index: 1000; pointer-events: none; }
+        #ui-layer h1 { margin: 0; font-size: 24px; letter-spacing: 5px; text-shadow: 0 0 10px #00ffcc; }
+        #start-btn { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 20px 50px; background: transparent; color: #00ffcc; border: 2px solid #00ffcc; cursor: pointer; z-index: 2000; font-weight: bold; font-size: 18px; transition: 0.4s; }
+        #start-btn:hover { background: rgba(0, 255, 204, 0.2); box-shadow: 0 0 50px #00ffcc; }
     </style>
 </head>
 <body>
 
-<div id="brand"><h1>LOWNEX</h1><p>PARTICLE ENGINE v3.0</p></div>
-<button id="start-btn">SİSTEMİ TETİKLE</button>
+<div id="ui-layer"><h1>LOWNEX ENGINE</h1><p id="stat">STATUS: READY</p></div>
+<button id="start-btn">SİSTEMİ BAŞLAT</button>
 <div id="video-container"><video id="input_video" playsinline muted></video></div>
 
 <script>
@@ -28,8 +29,9 @@ const videoElement = document.getElementById('input_video');
 const startBtn = document.getElementById('start-btn');
 let handLandmarks = [];
 let particles = [];
-let targetMode = 0; // 0: Flow/Arrow, 1: Sphere, 2: Heart
-const PARTICLE_COUNT = 450; 
+let mode = 0; // 0: Jupiter, 1: Starburst, 2: Sphere, 3: Heart, 4: Grid
+let lastFist = false;
+let globalRotation = 0;
 
 const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
 hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.8, minTrackingConfidence: 0.8 });
@@ -44,42 +46,51 @@ startBtn.addEventListener('click', () => { camera.start().then(() => { startBtn.
 
 function setup() {
     createCanvas(windowWidth, windowHeight, WEBGL);
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
+    for (let i = 0; i < 500; i++) {
         particles.push(new LownexParticle(i));
     }
 }
 
 function draw() {
-    // Videodaki "Motion Blur" (Hareket İzi) etkisi için
-    background(0, 0, 0, 95); 
+    // Videodaki "parlak iz" (trail) efekti için 0.9'luk bir temizleme
+    background(0, 0, 0, 45); 
     
-    let handSize = 0;
-    let rotationY = frameCount * 0.02;
+    let camRotationX = 0;
+    let camRotationY = 0;
+    let handDist = 0;
 
     if (handLandmarks && handLandmarks.length > 0) {
         let lm = handLandmarks[0];
-        handSize = dist(lm[12].x, lm[12].y, lm[0].x, lm[0].y);
+        handDist = dist(lm[12].x, lm[12].y, lm[0].x, lm[0].y);
         
-        // El durumuna göre mod geçişleri (Videodaki sırayla)
-        if (handSize < 0.18) targetMode = 0; // Yumruk -> OK / IŞIN
-        else if (handSize > 0.45) targetMode = 2; // Tam Açık -> KALP
-        else targetMode = 1; // Orta -> JÜPİTER / KÜRE
+        // El takibi ile kamera açısı
+        camRotationY = lerp(camRotationY, map(lm[9].x, 0, 1, PI/3, -PI/3), 0.1);
+        camRotationX = lerp(camRotationX, map(lm[9].y, 0, 1, -PI/3, PI/3), 0.1);
 
-        // Elin X konumuna göre bakış açısını döndür
-        rotationY = map(lm[9].x, 0, 1, PI/4, -PI/4);
+        // FORM KONTROLÜ (Betimlemendeki gibi)
+        let isFist = handDist < 0.15;
+        if (isFist && !lastFist) {
+            mode = (mode + 1) % 5; // Her yumrukta yeni forma geç
+            document.getElementById('stat').innerText = "MODE: " + mode;
+        }
+        lastFist = isFist;
     }
 
-    rotateY(rotationY);
+    rotateX(camRotationX);
+    rotateY(camRotationY + frameCount * 0.01);
 
-    // Parçacık Yönetimi
-    for (let i = 0; i < particles.length; i++) {
-        particles[i].update(targetMode, handSize);
-        particles[i].show();
+    // Parçacıkları Çiz ve Bağla
+    particles.forEach(p => {
+        p.update(mode, handDist);
+        p.show();
+    });
 
-        // Videodaki "Işın/Bağlantı" çizgileri
-        if (i % 20 === 0 && targetMode !== 0) {
-            let next = particles[(i + 1) % particles.length];
-            stroke(0, 255, 204, 40);
+    // Videodaki "Işık Hüzmeleri" (Ağ Yapısı)
+    if (mode === 2 || mode === 4) { // Küre ve Grid modunda çizgiler çıkar
+        strokeWeight(0.4);
+        for(let i=0; i<particles.length; i+=25) {
+            let next = particles[(i+1)%particles.length];
+            stroke(0, 255, 204, 60);
             line(particles[i].pos.x, particles[i].pos.y, particles[i].pos.z, next.pos.x, next.pos.y, next.pos.z);
         }
     }
@@ -88,46 +99,58 @@ function draw() {
 class LownexParticle {
     constructor(id) {
         this.id = id;
-        this.reset();
-        this.color = color(0, 255, 204);
+        this.pos = createVector(random(-100, 100), random(-100, 100), random(-100, 100));
         this.angle = random(TWO_PI);
         this.phi = acos(random(-1, 1));
+        this.color = color(255);
     }
 
-    reset() {
-        // Başlangıçta derinlikten gelme (Z akışı)
-        this.pos = createVector(random(-20, 20), random(-20, 20), random(-1500, -500));
-        this.speed = random(15, 30);
-    }
+    update(mode, d) {
+        let target = createVector(0,0,0);
+        let r = map(d, 0.1, 0.5, 40, 350);
 
-    update(mode, size) {
-        let targetPos = createVector(this.pos.x, this.pos.y, this.pos.z);
-        let r = map(size, 0.1, 0.5, 50, 300);
-
-        if (mode === 0) { // OK / FLOW (Videodaki başlangıç hali)
-            targetPos.x = (this.id % 5 - 2.5) * 2;
-            targetPos.y = (Math.floor(this.id / 5) % 5 - 2.5) * 2;
-            // Z ekseninde durdurulamaz akış
-            this.pos.z += this.speed;
-            if (this.pos.z > 500) this.pos.z = -1500;
-        } 
-        else if (mode === 1) { // KÜRE (Jüpiter Modu)
-            targetPos.x = r * sin(this.phi) * cos(this.angle);
-            targetPos.y = r * sin(this.phi) * sin(this.angle);
-            targetPos.z = r * cos(this.phi);
+        if (mode === 0) { // JÜPİTER (Yoğun merkez + halka)
+            if (this.id % 3 === 0) { // Halka parçacıkları
+                target.x = 250 * cos(this.angle);
+                target.z = 250 * sin(this.angle);
+                target.y = random(-10, 10);
+            } else { // Merkez çekirdek
+                target.x = random(-40, 40);
+                target.y = random(-40, 40);
+                target.z = random(-40, 40);
+            }
+            this.color = color(255, 255, 255);
         }
-        else if (mode === 2) { // KALP
-            let t = map(this.id, 0, PARTICLE_COUNT, 0, TWO_PI);
+        else if (mode === 1) { // PATLAMA (Dışarı doğru ışınlar)
+            let speed = map(this.id, 0, 500, 5, 25);
+            this.pos.add(p5.Vector.random3D().mult(speed));
+            if (this.pos.mag() > 1000) this.pos.set(0,0,0);
+            this.color = color(255, 255, 255, 150);
+        }
+        else if (mode === 2) { // MAVİ KÜRE
+            target.x = r * sin(this.phi) * cos(this.angle);
+            target.y = r * sin(this.phi) * sin(this.angle);
+            target.z = r * cos(this.phi);
+            this.color = color(0, 200, 255);
+        }
+        else if (mode === 3) { // YEŞİL KALP
+            let t = map(this.id, 0, 500, 0, TWO_PI);
             let x = 16 * pow(sin(t), 3);
             let y = -(13 * cos(t) - 5 * cos(2 * t) - 2 * cos(3 * t) - cos(4 * t));
-            targetPos = createVector(x * (r/12), y * (r/12), 0);
+            target = createVector(x * (r/12), y * (r/12), 0);
+            this.color = color(0, 255, 150);
+        }
+        else if (mode === 4) { // GEOMETRİK GRID
+            target.x = (this.id % 20 - 10) * (r/5);
+            target.y = (floor(this.id / 20) % 20 - 10) * (r/5);
+            target.z = sin(frameCount * 0.1 + this.id) * 50;
+            this.color = color(100, 255, 100);
         }
 
-        // Akışkan geçişler
-        this.pos.x = lerp(this.pos.x, targetPos.x, 0.15);
-        this.pos.y = lerp(this.pos.y, targetPos.y, 0.15);
-        if (mode !== 0) {
-            this.pos.z = lerp(this.pos.z, targetPos.z, 0.1);
+        if (mode !== 1) {
+            this.pos.x = lerp(this.pos.x, target.x, 0.1);
+            this.pos.y = lerp(this.pos.y, target.y, 0.1);
+            this.pos.z = lerp(this.pos.z, target.z, 0.1);
         }
     }
 
@@ -135,8 +158,8 @@ class LownexParticle {
         push();
         translate(this.pos.x, this.pos.y, this.pos.z);
         noStroke();
-        fill(0, 255, 204, 220);
-        sphere(2.5); // Neon boncuklar
+        fill(this.color);
+        sphere(2.5);
         pop();
     }
 }
