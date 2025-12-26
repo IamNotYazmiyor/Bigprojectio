@@ -1,49 +1,49 @@
-
 <!DOCTYPE html>
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Süper Dinamik Kalp Sistemi</title>
+    <title>Lownex Multi-Shape System</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; }
-        #video-container { position: fixed; bottom: 10px; right: 10px; width: 100px; height: 75px; border: 1px solid #00ffcc; border-radius: 5px; z-index: 100; transform: scaleX(-1); }
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        #video-container { position: fixed; bottom: 15px; right: 15px; width: 110px; height: 80px; border: 2px solid #00ffcc; border-radius: 8px; z-index: 100; transform: scaleX(-1); }
         video { width: 100%; height: 100%; object-fit: cover; }
-        #start-btn { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 15px 30px; background: #00ffcc; border: none; border-radius: 5px; z-index: 1000; font-weight: bold; cursor: pointer; }
+        #info { position: fixed; top: 20px; left: 20px; color: #00ffcc; z-index: 1000; }
+        #info h1 { margin: 0; font-size: 20px; letter-spacing: 3px; }
+        #start-btn { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 15px 40px; background: transparent; color: #00ffcc; border: 2px solid #00ffcc; cursor: pointer; z-index: 2000; font-weight: bold; }
     </style>
 </head>
 <body>
 
-<button id="start-btn">Sistemi Başlat</button>
+<div id="info"><h1>LOWNEX</h1><p id="mode-text">MOD: KÜRE</p></div>
+<button id="start-btn">SİSTEMİ BAŞLAT</button>
 <div id="video-container"><video id="input_video" playsinline muted></video></div>
 
 <script>
 const videoElement = document.getElementById('input_video');
 const startBtn = document.getElementById('start-btn');
+const modeText = document.getElementById('mode-text');
+
 let handLandmarks = [];
 let particles = [];
-let isHeartMode = false;
+let currentMode = 0; // 0: Küre, 1: Kalp, 2: Ok
+let lastFistStatus = false;
 
-// Dönüş Değişkenleri
-let rotY = 0;
-let rotX = 0;
-let velocityY = 0;
-let velocityX = 0;
-let lastFingerX = 0;
-let lastFingerY = 0;
-
-const PARTICLE_COUNT = 300; 
+let rotY = 0, rotX = 0;
+let velX = 0, velY = 0;
+let lastX = 0, lastY = 0;
+const PARTICLE_COUNT = 300;
 
 const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
-hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
 hands.onResults((results) => { handLandmarks = results.multiHandLandmarks; });
 
 const camera = new Camera(videoElement, {
     onFrame: async () => { await hands.send({image: videoElement}); },
-    width: 480, height: 360
+    width: 640, height: 480
 });
 
 startBtn.addEventListener('click', () => { camera.start().then(() => { startBtn.style.display = 'none'; }); });
@@ -51,85 +51,95 @@ startBtn.addEventListener('click', () => { camera.start().then(() => { startBtn.
 function setup() {
     createCanvas(windowWidth, windowHeight, WEBGL);
     for (let i = 0; i < PARTICLE_COUNT; i++) {
-        particles.push(new SmartParticle(i));
+        particles.push(new LownexObject(i));
     }
 }
 
 function draw() {
-    background(0);
+    background(0, 0, 0, 70);
     let targetRadius = 150;
 
     if (handLandmarks && handLandmarks.length > 0) {
         let lm = handLandmarks[0];
-        let fingerX = lm[8].x;
-        let fingerY = lm[8].y;
-
-        // 1. Kalp Modu Algılama
-        let indexUp = lm[8].y < lm[6].y;
-        let middleDown = lm[12].y > lm[10].y;
-        let pinkyDown = lm[20].y > lm[18].y;
-        isHeartMode = (indexUp && middleDown && pinkyDown);
-
-        // 2. Hız Hesaplama (Mevcut X - Önceki X)
-        velocityX = (fingerX - lastFingerX) * 0.5;
-        velocityY = (fingerY - lastFingerY) * 0.5;
-
-        // 3. Dönüşü Güncelle
-        rotY += velocityX * 10; // Parmağını savurma hızına göre döner
-        rotX += velocityY * 10;
-
-        // 4. Boyut
+        
+        // Yumruk Kontrolü (Şekil Değiştirmek İçin)
         let d = dist(lm[12].x, lm[12].y, lm[0].x, lm[0].y);
-        targetRadius = map(d, 0.1, 0.5, 40, min(width, height) * 0.4);
+        let isFist = d < 0.15;
 
-        // Mevcut konumu bir sonraki kare için kaydet
-        lastFingerX = fingerX;
-        lastFingerY = fingerY;
+        // Yumruk yapıp açınca modu değiştir
+        if (isFist && !lastFistStatus) {
+            currentMode = (currentMode + 1) % 3;
+            updateModeText();
+        }
+        lastFistStatus = isFist;
+
+        // Boyut ve Hız
+        targetRadius = map(d, 0.1, 0.5, 40, min(width, height) * 0.4);
+        velX = (lm[8].x - lastX) * 0.8;
+        velY = (lm[8].y - lastY) * 0.8;
+        rotY += velX * 5; rotX += velY * 5;
+        lastX = lm[8].x; lastY = lm[8].y;
     }
 
-    // Sürtünme Efekti (Elimizi çektiğimizde yavaşça durması için)
-    rotY += velocityX; 
-    rotX += velocityY;
-    velocityX *= 0.95; 
-    velocityY *= 0.95;
+    rotY += velX; rotX += velY;
+    velX *= 0.95; velY *= 0.95;
 
     push();
-    rotateY(rotY + frameCount * 0.005); // Sabit yavaş dönüş + el ivmesi
+    rotateY(rotY + frameCount * 0.01);
     rotateX(rotX);
 
     particles.forEach(p => {
-        p.update(targetRadius, isHeartMode);
+        p.update(targetRadius, currentMode);
         p.show();
     });
+
+    // Bağlantı Çizgileri (Sadece Küre Modunda)
+    if (currentMode === 0 && targetRadius > 80) {
+        strokeWeight(0.5);
+        for(let i=0; i<particles.length; i+=20) {
+            for(let j=i+1; j<particles.length; j+=30) {
+                let distP = p5.Vector.dist(particles[i].pos, particles[j].pos);
+                if (distP < targetRadius * 0.6) {
+                    stroke(0, 255, 204, 80);
+                    line(particles[i].pos.x, particles[i].pos.y, particles[i].pos.z, particles[j].pos.x, particles[j].pos.y, particles[j].pos.z);
+                }
+            }
+        }
+    }
     pop();
 }
 
-class SmartParticle {
+function updateModeText() {
+    const modes = ["KÜRE", "KALP", "OK (ARROW)"];
+    modeText.innerText = "MOD: " + modes[currentMode];
+}
+
+class LownexObject {
     constructor(index) {
         this.index = index;
         this.theta = random(TWO_PI);
         this.phi = acos(random(-1, 1));
-        this.pos = createVector(0, 0, 0);
-        this.color = color(random(150, 255), 50, random(100, 255)); 
+        this.pos = createVector(0,0,0);
+        this.color = color(0, 255, 204);
     }
 
-    update(r, heartMode) {
-        let targetPos;
-        if (heartMode) {
+    update(r, mode) {
+        let tPos;
+        if (mode === 0) { // KÜRE
+            tPos = createVector(r * sin(this.phi) * cos(this.theta), r * sin(this.phi) * sin(this.theta), r * cos(this.phi));
+        } else if (mode === 1) { // KALP
             let t = map(this.index, 0, PARTICLE_COUNT, 0, TWO_PI);
             let x = 16 * pow(sin(t), 3);
             let y = -(13 * cos(t) - 5 * cos(2 * t) - 2 * cos(3 * t) - cos(4 * t));
-            targetPos = createVector(x * (r/10), y * (r/10), 0); // r/10 ile daha geniş kalp
-        } else {
-            let x = r * sin(this.phi) * cos(this.theta);
-            let y = r * sin(this.phi) * sin(this.theta);
-            let z = r * cos(this.phi);
-            targetPos = createVector(x, y, z);
+            tPos = createVector(x * (r/12), y * (r/12), 0);
+        } else { // OK (ARROW)
+            let zPos = map(this.index, 0, PARTICLE_COUNT, -r, r);
+            let spread = map(abs(zPos), 0, r, 0, 10);
+            tPos = createVector(random(-spread, spread), random(-spread, spread), zPos);
         }
-
-        this.pos.x = lerp(this.pos.x, targetPos.x, 0.12);
-        this.pos.y = lerp(this.pos.y, targetPos.y, 0.12);
-        this.pos.z = lerp(this.pos.z, targetPos.z, 0.12);
+        this.pos.x = lerp(this.pos.x, tPos.x, 0.1);
+        this.pos.y = lerp(this.pos.y, tPos.y, 0.1);
+        this.pos.z = lerp(this.pos.z, tPos.z, 0.1);
     }
 
     show() {
@@ -137,7 +147,7 @@ class SmartParticle {
         translate(this.pos.x, this.pos.y, this.pos.z);
         noStroke();
         fill(this.color);
-        sphere(2.5);
+        sphere(2);
         pop();
     }
 }
@@ -146,3 +156,4 @@ function windowResized() { resizeCanvas(windowWidth, windowHeight); }
 </script>
 </body>
 </html>
+
