@@ -3,24 +3,16 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Stabil El Kontrollü Küre</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magic Particles - Heart Mode</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
     <style>
         body { margin: 0; overflow: hidden; background: #000; }
-        #video-container {
-            position: fixed; bottom: 10px; right: 10px;
-            width: 100px; height: 75px;
-            border: 1px solid #00ffcc; border-radius: 5px;
-            z-index: 100; transform: scaleX(-1); opacity: 0.7;
-        }
+        #video-container { position: fixed; bottom: 10px; right: 10px; width: 100px; height: 75px; border: 1px solid #ff3366; border-radius: 5px; z-index: 100; transform: scaleX(-1); }
         video { width: 100%; height: 100%; object-fit: cover; }
-        #start-btn {
-            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            padding: 15px 30px; background: #00ffcc; border: none; border-radius: 5px; z-index: 1000;
-        }
+        #start-btn { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 15px 30px; background: #ff3366; color: white; border: none; border-radius: 5px; z-index: 1000; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -33,7 +25,8 @@ const videoElement = document.getElementById('input_video');
 const startBtn = document.getElementById('start-btn');
 let handLandmarks = [];
 let particles = [];
-const PARTICLE_COUNT = 200; 
+let isHeartMode = false;
+const PARTICLE_COUNT = 250;
 
 const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
 hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
@@ -44,82 +37,90 @@ const camera = new Camera(videoElement, {
     width: 480, height: 360
 });
 
-startBtn.addEventListener('click', () => {
-    camera.start().then(() => { startBtn.style.display = 'none'; });
-});
+startBtn.addEventListener('click', () => { camera.start().then(() => { startBtn.style.display = 'none'; }); });
 
 function setup() {
     createCanvas(windowWidth, windowHeight, WEBGL);
     for (let i = 0; i < PARTICLE_COUNT; i++) {
-        particles.push(new SphereParticle());
+        particles.push(new SmartParticle(i));
     }
 }
 
 function draw() {
     background(0);
-    
-    // Varsayılan değerler
-    let targetRadius = 120; 
-    let rotationSpeed = 0.005; // Yavaş dönüş
+    let targetRadius = 120;
 
     if (handLandmarks && handLandmarks.length > 0) {
-        let landmarks = handLandmarks[0];
+        let lm = handLandmarks[0];
         
-        // El açıklığını ölç (Bilek ve Orta parmak ucu arası)
-        let d = dist(landmarks[12].x, landmarks[12].y, landmarks[0].x, landmarks[0].y);
+        // 1. MOD KONTROLÜ (İşaret parmağı havada, diğerleri kapalı mı?)
+        // İpucu: Parmak uçlarının bilekten olan mesafesine bakıyoruz
+        let indexUp = lm[8].y < lm[6].y;
+        let middleDown = lm[12].y > lm[10].y;
+        let ringDown = lm[16].y > lm[14].y;
         
-        // SINIRLANDIRMA: Küre en fazla ekranın %80'i kadar büyüyebilir
-        let maxSafeRadius = min(width, height) * 0.4;
-        // Yumruk (yaklaşık 0.1 mesafe) -> 40px | Açık el (yaklaşık 0.5 mesafe) -> maxSafeRadius
-        targetRadius = map(d, 0.12, 0.5, 30, maxSafeRadius);
-        targetRadius = constrain(targetRadius, 30, maxSafeRadius); // Güvenli aralıkta tut
+        isHeartMode = (indexUp && middleDown && ringDown);
 
-        // Dönüş hızı el hareketine göre hafifçe artsın
-        rotationSpeed = map(d, 0.1, 0.5, 0.005, 0.02);
+        // 2. BOYUT KONTROLÜ (Küre için)
+        let d = dist(lm[12].x, lm[12].y, lm[0].x, lm[0].y);
+        let maxSafe = min(width, height) * 0.35;
+        targetRadius = map(d, 0.15, 0.45, 40, maxSafe);
+        targetRadius = constrain(targetRadius, 40, maxSafe);
     }
 
     push();
-    // Kürenin kendi etrafında yavaşça dönmesi
-    rotateY(frameCount * rotationSpeed);
-    rotateX(frameCount * 0.003); 
+    rotateY(frameCount * 0.01);
+    rotateX(frameCount * 0.005);
 
     particles.forEach(p => {
-        p.update(targetRadius);
+        p.update(targetRadius, isHeartMode);
         p.show();
     });
     pop();
 }
 
-class SphereParticle {
-    constructor() {
+class SmartParticle {
+    constructor(index) {
+        this.index = index;
+        // Küre için rastgele açılar
         this.theta = random(TWO_PI);
         this.phi = acos(random(-1, 1));
-        this.currentR = 100;
-        // Neon Turkuaz renk paleti
-        this.color = color(0, random(200, 255), random(150, 255)); 
+        this.pos = createVector(random(-100, 100), random(-100, 100), random(-100, 100));
+        this.color = color(255, random(50, 150), random(100, 200)); // Kalp rengi (pembe/kırmızı tonları)
     }
 
-    update(targetR) {
-        // HAREKET YAVAŞLATMA: 0.1 yerine 0.03 kullanarak daha "yumuşak" geçiş sağladık
-        this.currentR = lerp(this.currentR, targetR, 0.04);
+    update(r, heartMode) {
+        let targetPos;
+
+        if (heartMode) {
+            // KALP FORMÜLÜ (Parametrik)
+            let t = map(this.index, 0, PARTICLE_COUNT, 0, TWO_PI);
+            let x = 16 * pow(sin(t), 3);
+            let y = -(13 * cos(t) - 5 * cos(2 * t) - 2 * cos(3 * t) - cos(4 * t));
+            targetPos = createVector(x * (r/15), y * (r/15), 0);
+        } else {
+            // KÜRE FORMÜLÜ
+            let x = r * sin(this.phi) * cos(this.theta);
+            let y = r * sin(this.phi) * sin(this.theta);
+            let z = r * cos(this.phi);
+            targetPos = createVector(x, y, z);
+        }
+
+        // Yavaş ve akıcı geçiş (lerp)
+        this.pos.x = lerp(this.pos.x, targetPos.x, 0.05);
+        this.pos.y = lerp(this.pos.y, targetPos.y, 0.05);
+        this.pos.z = lerp(this.pos.z, targetPos.z, 0.05);
     }
 
     show() {
-        let x = this.currentR * sin(this.phi) * cos(this.theta);
-        let y = this.currentR * sin(this.phi) * sin(this.theta);
-        let z = this.currentR * cos(this.phi);
-
         push();
-        translate(x, y, z);
+        translate(this.pos.x, this.pos.y, this.pos.z);
         noStroke();
         fill(this.color);
-        // Noktalar yerine çok küçük küreler (ışık efekti verir)
-        sphere(2); 
+        sphere(2.5);
         pop();
     }
 }
-
-function windowResized() { resizeCanvas(windowWidth, windowHeight); }
 </script>
 </body>
 </html>
