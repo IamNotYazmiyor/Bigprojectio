@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>El Takibi Parçacık Sistemi</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+
+<script>
+let handLandmarks = [];
+let particles = [];
+
+// 1. MediaPipe Kurulumu
+const hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+});
+
+hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+});
+
+hands.onResults((results) => {
+    handLandmarks = results.multiHandLandmarks;
+});
+
+// 2. Kamera Başlatma
+const videoElement = document.createElement('video');
+const camera = new Camera(videoElement, {
+    onFrame: async () => {
+        await hands.send({image: videoElement});
+    },
+    width: 640,
+    height: 480
+});
+camera.start();
+
+// 3. p5.js ile Çizim (Parçacık Sistemi)
+function setup() {
+    createCanvas(windowWidth, windowHeight);
+}
+
+function draw() {
+    background(0, 50); // Hafif iz bırakması için yarı saydam arka plan
+
+    if (handLandmarks && handLandmarks.length > 0) {
+        // İşaret parmağı ucunun koordinatları (Landmark 8)
+        let finger = handLandmarks[0][8];
+        let x = finger.x * width;
+        let y = finger.y * height;
+
+        // Her karede yeni parçacıklar ekle
+        for (let i = 0; i < 5; i++) {
+            particles.push(new Particle(x, y));
+        }
+    }
+
+    // Parçacıkları güncelle ve çiz
+    for (let i = particles.length - 1; i >= 0; i--) {
+        particles[i].update();
+        particles[i].show();
+        if (particles[i].finished()) {
+            particles.splice(i, 1);
+        }
+    }
+}
+
+class Particle {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.vx = random(-2, 2);
+        this.vy = random(-2, 2);
+        this.alpha = 255;
+        this.color = color(0, 255, 200); // Turkuaz neon renk
+    }
+
+    finished() {
+        return this.alpha < 0;
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.alpha -= 5;
+    }
+
+    show() {
+        noStroke();
+        fill(this.color.levels[0], this.color.levels[1], this.color.levels[2], this.alpha);
+        ellipse(this.x, this.y, 8);
+    }
+}
+
+function windowResized() {
+    resizeCanvas(windowWidth, windowHeight);
+}
+</script>
+</body>
+</html>
