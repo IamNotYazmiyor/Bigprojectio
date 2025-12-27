@@ -1,512 +1,458 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gesture Controlled 3D Particles</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Optimize Edilmiş 3D Parçacık Sistemi</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <!-- MediaPipe Hands -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     
     <style>
-        body { margin: 0; overflow: hidden; background-color: #050505; color: white; font-family: 'Inter', sans-serif; }
-        #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
-        #video-input { position: absolute; bottom: 20px; right: 20px; width: 160px; height: 120px; transform: scaleX(-1); border-radius: 12px; border: 2px solid rgba(255,255,255,0.2); z-index: 10; opacity: 0.8; }
-        .ui-overlay { position: absolute; top: 20px; left: 20px; z-index: 20; pointer-events: none; }
-        .loading-overlay { position: fixed; inset: 0; background: #000; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 50; transition: opacity 0.5s ease; }
-        .gesture-pill { background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); padding: 8px 16px; border-radius: 99px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; transition: all 0.3s ease; opacity: 0.5; }
-        .gesture-pill.active { background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.5); opacity: 1; transform: translateX(10px); box-shadow: 0 0 15px rgba(255,255,255,0.1); }
-        .dot { width: 8px; height: 8px; border-radius: 50%; background: #666; transition: background 0.3s; }
-        .gesture-pill.active .dot { background: #00ff88; box-shadow: 0 0 10px #00ff88; }
+        body { margin: 0; overflow: hidden; background-color: #050505; color: white; font-family: 'Inter', sans-serif; touch-action: none; }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100dvh; z-index: 1; }
+        /* Video gizli ama işlem için gerekli */
+        #video-input { position: absolute; bottom: 10px; right: 10px; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
         
-        /* Custom scrollbar for instructions if needed */
-        ::-webkit-scrollbar { width: 0px; }
+        .ui-overlay { 
+            position: absolute; top: 0; left: 0; width: 100%; padding: 20px; 
+            z-index: 20; pointer-events: none; 
+            background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+        }
+        
+        .loading-overlay { 
+            position: fixed; inset: 0; background: #000; 
+            display: flex; flex-direction: column; justify-content: center; align-items: center; 
+            z-index: 50; transition: opacity 0.5s ease; 
+        }
+
+        .gesture-pill { 
+            background: rgba(255,255,255,0.1); backdrop-filter: blur(5px); 
+            border: 1px solid rgba(255,255,255,0.1); padding: 6px 12px; 
+            border-radius: 20px; margin-bottom: 6px; 
+            display: flex; align-items: center; gap: 8px; 
+            transition: all 0.3s ease; opacity: 0.6; transform: scale(0.9);
+        }
+        .gesture-pill.active { 
+            background: rgba(0, 255, 136, 0.2); border-color: rgba(0, 255, 136, 0.5); 
+            opacity: 1; transform: scale(1); box-shadow: 0 0 10px rgba(0, 255, 136, 0.2); 
+        }
+        .dot { width: 6px; height: 6px; border-radius: 50%; background: #999; }
+        .gesture-pill.active .dot { background: #00ff88; }
+        
+        /* Kamera önizlemesi (Kullanıcının kendini görmesi için küçük pencere) */
+        #cam-preview {
+            position: absolute; bottom: 20px; right: 20px; width: 100px; height: 75px;
+            background: #000; border-radius: 10px; border: 2px solid rgba(255,255,255,0.2);
+            z-index: 30; overflow: hidden; transform: scaleX(-1);
+        }
+        #cam-preview video { width: 100%; height: 100%; object-fit: cover; }
     </style>
 </head>
 <body>
 
-    <!-- Loading Screen -->
+    <!-- Yükleniyor Ekranı -->
     <div id="loading" class="loading-overlay">
-        <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-white mb-4"></div>
-        <h2 class="text-xl font-light tracking-wider">Initializing Neural Net...</h2>
-        <p class="text-gray-400 text-sm mt-2">Please allow camera access</p>
+        <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <h2 class="text-lg font-medium text-white">Sistem Başlatılıyor...</h2>
+        <p class="text-gray-400 text-xs mt-2 text-center max-w-xs">Kamera izni verin.<br>Mobilde performans için düşük grafik modu devrede.</p>
     </div>
 
-    <!-- Main UI -->
+    <!-- Arayüz -->
     <div class="ui-overlay">
-        <h1 class="text-3xl font-bold tracking-tighter mb-1 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
-            AETHER
-        </h1>
-        <p class="text-xs text-gray-400 mb-6 max-w-[200px]">Interactive Particle Morphing</p>
-
-        <div id="gesture-list">
-            <div class="gesture-pill" data-fingers="0">
-                <div class="dot"></div> <span class="text-sm font-medium">Fist: Black Hole</span>
+        <div class="flex justify-between items-start">
+            <div>
+                <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-green-400">
+                    AETHER v2
+                </h1>
+                <p class="text-[10px] text-gray-400 mb-4">El Hareketleri veya Dokunmatik</p>
             </div>
-            <div class="gesture-pill" data-fingers="1">
-                <div class="dot"></div> <span class="text-sm font-medium">1 Finger: Heart</span>
-            </div>
-            <div class="gesture-pill" data-fingers="2">
-                <div class="dot"></div> <span class="text-sm font-medium">2 Fingers: Saturn</span>
-            </div>
-            <div class="gesture-pill" data-fingers="3">
-                <div class="dot"></div> <span class="text-sm font-medium">3 Fingers: Flower</span>
-            </div>
-            <div class="gesture-pill" data-fingers="4">
-                <div class="dot"></div> <span class="text-sm font-medium">4 Fingers: Helix</span>
-            </div>
-            <div class="gesture-pill active" data-fingers="5">
-                <div class="dot"></div> <span class="text-sm font-medium">Open Hand: Sphere</span>
+            
+            <!-- Durum Göstergesi -->
+            <div id="status-badge" class="px-2 py-1 rounded bg-red-900/50 border border-red-500/30 text-[10px] text-red-200">
+                Kamera Kapalı
             </div>
         </div>
-        
-        <div class="mt-6 p-3 bg-white/5 backdrop-blur-md rounded-lg border border-white/10 max-w-[220px]">
-            <p class="text-xs text-gray-300 leading-relaxed">
-                <span class="text-blue-400 font-bold">Pinch</span> to scale.<br>
-                <span class="text-purple-400 font-bold">Move Hand</span> to rotate.<br>
-            </p>
+
+        <div id="gesture-list" class="flex flex-wrap gap-2 max-w-[300px]">
+            <div class="gesture-pill" data-fingers="0"><div class="dot"></div> <span class="text-xs">Yumruk: Kara Delik</span></div>
+            <div class="gesture-pill" data-fingers="1"><div class="dot"></div> <span class="text-xs">1 Parmak: Kalp</span></div>
+            <div class="gesture-pill" data-fingers="2"><div class="dot"></div> <span class="text-xs">2 Parmak: Satürn</span></div>
+            <div class="gesture-pill" data-fingers="3"><div class="dot"></div> <span class="text-xs">3 Parmak: Çiçek</span></div>
+            <div class="gesture-pill" data-fingers="4"><div class="dot"></div> <span class="text-xs">4 Parmak: DNA</span></div>
+            <div class="gesture-pill active" data-fingers="5"><div class="dot"></div> <span class="text-xs">El Açık: Küre</span></div>
         </div>
     </div>
 
-    <!-- Hidden Video Input for MediaPipe -->
+    <!-- İşlem Videosu (Gizli) -->
     <video id="video-input" playsinline></video>
+    
+    <!-- Önizleme Videosu (Görünür) -->
+    <div id="cam-preview"></div>
     
     <!-- 3D Canvas -->
     <div id="canvas-container"></div>
 
     <script>
-        // --- Configuration ---
-        const PARTICLE_COUNT = 15000;
-        const PARTICLE_SIZE = 0.08;
-        const CAM_Z = 40;
+        // --- Mobil Kontrolü ve Ayarlar ---
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 800;
         
-        // --- State ---
+        // Mobilde parçacık sayısını düşürerek kasmayı engelliyoruz
+        const PARTICLE_COUNT = isMobile ? 5000 : 12000;
+        const PARTICLE_SIZE = isMobile ? 0.15 : 0.08;
+        const CAM_Z = isMobile ? 55 : 40; // Mobilde kamerayı geri çek
+        
         let currentShape = 'sphere';
-        let targetPositions = []; // Float32Array
-        let currentPositions = []; // Float32Array
-        let handPosition = { x: 0, y: 0, z: 0 };
-        let handOpenness = 1.0; // 0 to 1
+        let targetPositions = []; 
+        let currentPositions = []; 
         let isHandDetected = false;
-        let activeFingers = 5;
+        
+        // Etkileşim Değişkenleri
+        let rotationX = 0;
+        let rotationY = 0;
+        let targetRotationX = 0;
+        let targetRotationY = 0;
+        let shapeScale = 1.0;
 
-        // --- Three.js Setup ---
+        // --- Three.js Kurulumu ---
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
-        // Fog for depth
-        scene.fog = new THREE.FogExp2(0x050505, 0.02);
+        scene.fog = new THREE.FogExp2(0x000000, 0.02);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.z = CAM_Z;
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: !isMobile, alpha: true, powerPreference: "high-performance" });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Performance optimization
+        // Mobilde pixelRatio'yu düşürerek GPU yükünü azalt
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2)); 
         container.appendChild(renderer.domElement);
 
-        // --- Particle System ---
+        // --- Parçacık Sistemi ---
         const geometry = new THREE.BufferGeometry();
         const positions = new Float32Array(PARTICLE_COUNT * 3);
         const colors = new Float32Array(PARTICLE_COUNT * 3);
         
-        // Initialize random positions
+        // Başlangıç pozisyonları
         for (let i = 0; i < PARTICLE_COUNT * 3; i++) {
-            positions[i] = (Math.random() - 0.5) * 50;
+            positions[i] = (Math.random() - 0.5) * 100;
             colors[i] = 1.0;
         }
 
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-        // Shader Material for nice glowing dots
+        // Doku oluşturma (Performans için basit)
+        const canvas = document.createElement('canvas');
+        canvas.width = 16; canvas.height = 16; // Küçük doku = hızlı render
+        const ctx = canvas.getContext('2d');
+        const grad = ctx.createRadialGradient(8, 8, 0, 8, 8, 8);
+        grad.addColorStop(0, 'rgba(255,255,255,1)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 16, 16);
+        const texture = new THREE.CanvasTexture(canvas);
+
         const material = new THREE.PointsMaterial({
             size: PARTICLE_SIZE,
+            map: texture,
             vertexColors: true,
             blending: THREE.AdditiveBlending,
             depthWrite: false,
             transparent: true,
-            opacity: 0.8
+            opacity: 0.9
         });
-
-        // Use a simple texture for particles if desired, or just square points for speed
-        // Let's create a soft circular texture programmatically
-        const canvas = document.createElement('canvas');
-        canvas.width = 32; canvas.height = 32;
-        const context = canvas.getContext('2d');
-        const gradient = context.createRadialGradient(16, 16, 0, 16, 16, 16);
-        gradient.addColorStop(0, 'rgba(255,255,255,1)');
-        gradient.addColorStop(0.2, 'rgba(255,255,255,0.8)');
-        gradient.addColorStop(0.5, 'rgba(255,255,255,0.2)');
-        gradient.addColorStop(1, 'rgba(0,0,0,0)');
-        context.fillStyle = gradient;
-        context.fillRect(0, 0, 32, 32);
-        const texture = new THREE.CanvasTexture(canvas);
-        material.map = texture;
-        material.size = 0.5; // Adjust size for texture
 
         const particles = new THREE.Points(geometry, material);
         scene.add(particles);
 
-        // --- Math & Shapes ---
+        // --- Şekil Matematiği ---
         
-        function getSpherePoint(r) {
+        function getPoint(type, i, total) {
+            const r = 10;
             const u = Math.random();
             const v = Math.random();
             const theta = 2 * Math.PI * u;
             const phi = Math.acos(2 * v - 1);
-            return {
-                x: r * Math.sin(phi) * Math.cos(theta),
-                y: r * Math.sin(phi) * Math.sin(theta),
-                z: r * Math.cos(phi)
-            };
-        }
-
-        function getHeartPoint(scale) {
+            
             let x, y, z;
-            // Rejection sampling for a volume heart or surface parametric
-            // Let's use a 3D parametric heart curve
-            // formula: (x^2 + 9/4y^2 + z^2 - 1)^3 - x^2z^3 - 9/80y^2z^3 = 0
-            // Simpler parametric approach:
-            const t = Math.random() * Math.PI * 2;
-            const u = Math.random() * Math.PI; // slice
-            
-            // Standard 2D heart extruded or rotated? 
-            // Let's use the classic 3D heart coordinates
-            const phi = Math.random() * Math.PI * 2;
-            const theta = Math.random() * Math.PI;
-            
-            // A reliable parametric heart approximation
-            // x = 16sin^3(t)
-            // y = 13cos(t) - 5cos(2t) - 2cos(3t) - cos(4t)
-            // z = variation
-            
-            const r = scale * Math.sqrt(Math.random()); // Volume distribution
-            const t_heart = Math.random() * 2 * Math.PI;
-            
-            // 2D Heart base
-            let hx = 16 * Math.pow(Math.sin(t_heart), 3);
-            let hy = 13 * Math.cos(t_heart) - 5 * Math.cos(2 * t_heart) - 2 * Math.cos(3 * t_heart) - Math.cos(4 * t_heart);
-            
-            // Add depth
-            let hz = (Math.random() - 0.5) * 8 * Math.abs(Math.sin(t_heart)); // Thicker at top
-            
-            // Scale down
-            return { x: hx * scale * 0.05, y: hy * scale * 0.05, z: hz * scale * 0.05 };
-        }
 
-        function getSaturnPoint(scale) {
-            // Planet + Ring
-            const isRing = Math.random() > 0.6; 
-            
-            if (isRing) {
-                const inner = scale * 1.2;
-                const outer = scale * 2.0;
-                const dist = inner + Math.random() * (outer - inner);
-                const angle = Math.random() * Math.PI * 2;
-                return {
-                    x: Math.cos(angle) * dist,
-                    y: (Math.random() - 0.5) * 0.5, // Thin ring
-                    z: Math.sin(angle) * dist
-                };
-            } else {
-                // Planet sphere
-                return getSpherePoint(scale * 0.8);
+            if (type === 'sphere') {
+                x = r * Math.sin(phi) * Math.cos(theta);
+                y = r * Math.sin(phi) * Math.sin(theta);
+                z = r * Math.cos(phi);
+            } 
+            else if (type === 'heart') {
+                const t = Math.random() * Math.PI * 2;
+                // 3D Kalp Formülü
+                x = 16 * Math.pow(Math.sin(t), 3);
+                y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
+                z = (Math.random() - 0.5) * 4;
+                // Ölçekle
+                x *= 0.5; y *= 0.5; z *= 2;
             }
+            else if (type === 'saturn') {
+                // Halka mı gezegen mi?
+                if (Math.random() > 0.4) { // Halka
+                    const ang = Math.random() * Math.PI * 2;
+                    const rad = 12 + Math.random() * 8;
+                    x = Math.cos(ang) * rad;
+                    z = Math.sin(ang) * rad;
+                    y = (Math.random() - 0.5);
+                } else { // Gezegen
+                    x = r * 0.7 * Math.sin(phi) * Math.cos(theta);
+                    y = r * 0.7 * Math.sin(phi) * Math.sin(theta);
+                    z = r * 0.7 * Math.cos(phi);
+                }
+            }
+            else if (type === 'flower') {
+                const u = Math.random() * Math.PI * 2;
+                const v = Math.random() * Math.PI;
+                const rad = 10 * (1 + 0.5 * Math.sin(5 * u) * Math.sin(5 * v));
+                x = rad * Math.sin(v) * Math.cos(u);
+                y = rad * Math.sin(v) * Math.sin(u);
+                z = rad * Math.cos(v);
+            }
+            else if (type === 'helix') {
+                const t = Math.random() * 20; 
+                const strand = Math.random() > 0.5 ? 1 : -1;
+                x = 5 * Math.cos(t + strand * Math.PI);
+                y = (t - 10) * 2;
+                z = 5 * Math.sin(t + strand * Math.PI);
+            }
+            else if (type === 'blackhole') {
+                const ang = Math.random() * Math.PI * 2;
+                const rad = Math.random() * 2; // Çok küçük, yoğun merkez
+                x = Math.cos(ang) * rad;
+                y = (Math.random() - 0.5) * rad;
+                z = Math.sin(ang) * rad;
+            }
+
+            return {x, y, z};
         }
 
-        function getFlowerPoint(scale) {
-            // Rose/Flower parametric
-            const u = Math.random() * Math.PI * 2;
-            const v = Math.random() * Math.PI;
-            const r = scale * (1 + 0.5 * Math.sin(5 * u) * Math.sin(5 * v));
-            return {
-                x: r * Math.sin(v) * Math.cos(u),
-                y: r * Math.sin(v) * Math.sin(u),
-                z: r * Math.cos(v)
-            };
-        }
-        
-        function getHelixPoint(scale) {
-            // Double Helix DNA
-            const t = Math.random() * 10 * Math.PI; // Length
-            const radius = scale * 0.5;
-            const strand = Math.random() > 0.5 ? 1 : -1; // Two strands
-            
-            // Cylinder spiral
-            const x = radius * Math.cos(t + (strand * Math.PI));
-            const y = (t / (10 * Math.PI)) * scale * 4 - (scale * 2); // Spread vertically
-            const z = radius * Math.sin(t + (strand * Math.PI));
-            
-            // Add some noise/volume
-            return {
-                x: x + (Math.random()-0.5),
-                y: y,
-                z: z + (Math.random()-0.5)
-            };
-        }
-
-        // --- Template Generation ---
-        const templates = {
-            'sphere': new Float32Array(PARTICLE_COUNT * 3),
-            'heart': new Float32Array(PARTICLE_COUNT * 3),
-            'saturn': new Float32Array(PARTICLE_COUNT * 3),
-            'flower': new Float32Array(PARTICLE_COUNT * 3),
-            'helix': new Float32Array(PARTICLE_COUNT * 3),
-            'blackhole': new Float32Array(PARTICLE_COUNT * 3) // Collapsed point
-        };
+        const templates = {};
+        const shapeNames = ['sphere', 'heart', 'saturn', 'flower', 'helix', 'blackhole'];
 
         function generateTemplates() {
-            const scale = 10;
-            for (let i = 0; i < PARTICLE_COUNT; i++) {
-                // Sphere
-                const s = getSpherePoint(scale);
-                templates.sphere[i*3] = s.x; templates.sphere[i*3+1] = s.y; templates.sphere[i*3+2] = s.z;
-                
-                // Heart
-                const h = getHeartPoint(scale);
-                templates.heart[i*3] = h.x; templates.heart[i*3+1] = h.y; templates.heart[i*3+2] = h.z;
-
-                // Saturn
-                const sa = getSaturnPoint(scale);
-                templates.saturn[i*3] = sa.x; templates.saturn[i*3+1] = sa.y; templates.saturn[i*3+2] = sa.z;
-
-                // Flower
-                const f = getFlowerPoint(scale);
-                templates.flower[i*3] = f.x; templates.flower[i*3+1] = f.y; templates.flower[i*3+2] = f.z;
-                
-                // Helix
-                const he = getHelixPoint(scale);
-                templates.helix[i*3] = he.x; templates.helix[i*3+1] = he.y; templates.helix[i*3+2] = he.z;
-
-                // Black Hole (Center with slight noise)
-                templates.blackhole[i*3] = (Math.random()-0.5); 
-                templates.blackhole[i*3+1] = (Math.random()-0.5); 
-                templates.blackhole[i*3+2] = (Math.random()-0.5);
-            }
+            shapeNames.forEach(name => {
+                const arr = new Float32Array(PARTICLE_COUNT * 3);
+                for (let i = 0; i < PARTICLE_COUNT; i++) {
+                    const p = getPoint(name, i, PARTICLE_COUNT);
+                    arr[i*3] = p.x;
+                    arr[i*3+1] = p.y;
+                    arr[i*3+2] = p.z;
+                }
+                templates[name] = arr;
+            });
         }
         generateTemplates();
-        
-        // Initialize current positions
-        currentPositions = new Float32Array(templates.sphere);
         targetPositions = templates.sphere;
+        currentPositions = new Float32Array(templates.sphere);
 
-        // --- MediaPipe Handling ---
+        // --- Dokunmatik Kontroller (Touch) ---
+        let touchStartX = 0;
+        let touchStartY = 0;
+        
+        document.addEventListener('touchstart', e => {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        }, {passive: false});
+
+        document.addEventListener('touchmove', e => {
+            // Sayfa kaydırmayı engelle
+            e.preventDefault(); 
+            const deltaX = e.touches[0].clientX - touchStartX;
+            const deltaY = e.touches[0].clientY - touchStartY;
+            
+            targetRotationY += deltaX * 0.005;
+            targetRotationX += deltaY * 0.005;
+            
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        }, {passive: false});
+
+        // --- MediaPipe El Takibi ---
         const videoElement = document.getElementById('video-input');
+        const statusBadge = document.getElementById('status-badge');
         
         function onResults(results) {
-            const loading = document.getElementById('loading');
-            if (loading.style.opacity !== '0') {
-                loading.style.opacity = '0';
-                setTimeout(() => loading.style.display = 'none', 500);
-            }
+            document.getElementById('loading').style.opacity = '0';
+            setTimeout(() => document.getElementById('loading').style.display = 'none', 500);
+            
+            statusBadge.innerText = "Kamera Aktif";
+            statusBadge.className = "px-2 py-1 rounded bg-green-900/50 border border-green-500/30 text-[10px] text-green-200";
 
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                 isHandDetected = true;
                 const landmarks = results.multiHandLandmarks[0];
                 
-                // 1. Calculate Hand Center (using Palm landmarks: 0, 5, 9, 13, 17)
-                let cx = 0, cy = 0;
-                const palmIndices = [0, 5, 9, 13, 17];
-                palmIndices.forEach(idx => {
-                    cx += landmarks[idx].x;
-                    cy += landmarks[idx].y;
-                });
-                cx /= 5;
-                cy /= 5;
+                // Parmak Sayma (Daha basit ve sağlam mantık)
+                let fingers = 0;
+                // Başparmak (x eksenine göre kontrol)
+                if (landmarks[4].x < landmarks[3].x) fingers++; // Sağ el varsayımı (ayna modu)
+                // Diğer parmaklar (y ekseni - yukarıda mı?)
+                if (landmarks[8].y < landmarks[6].y) fingers++;
+                if (landmarks[12].y < landmarks[10].y) fingers++;
+                if (landmarks[16].y < landmarks[14].y) fingers++;
+                if (landmarks[20].y < landmarks[18].y) fingers++;
 
-                // Map 0-1 video coords to -1 to 1 Scene coords (inverted X for mirror effect)
-                handPosition.x = -(cx - 0.5) * 30; // Scale factor for range
-                handPosition.y = -(cy - 0.5) * 20;
+                // Özel durum: Yumruk (0) veya başparmak hatasını tolere et
+                // Burada basitlik adına UI'ı güncelliyoruz
+                updateShape(fingers);
 
-                // 2. Count Fingers (Simple Y-check against knuckles)
-                // Tips: 4, 8, 12, 16, 20. PIP joints: 2, 6, 10, 14, 18
-                // Note: Thumb is different (check X relative to wrist/knuckle depending on hand)
+                // El pozisyonuna göre döndürme
+                const cx = landmarks[9].x; // Avuç içi x
+                const cy = landmarks[9].y; // Avuç içi y
                 
-                let fingersUp = 0;
-                
-                // Thumb (approximate check based on x distance from index knuckle)
-                // If thumb tip (4) is farther from palm center than thumb ip (3), count it?
-                // Simplest check for demo: Check if tip is to the side of knuckle
-                // Assuming right hand mirror, or left hand. Let's rely on standard logic.
-                const wrist = landmarks[0];
-                const thumbTip = landmarks[4];
-                const thumbIp = landmarks[3];
-                // Distance based check is often more robust for orientation independence
-                if (Math.hypot(thumbTip.x - 9, thumbTip.y - 9) > Math.hypot(thumbIp.x - 9, thumbIp.y - 9)) {
-                    // This logic is flawed without proper joint checking, let's use vector logic
-                }
-                
-                // Robust finger counting
-                const tips = [8, 12, 16, 20];
-                const dips = [6, 10, 14, 18]; // Joints below tips
-                
-                // Check fingers 2-5
-                tips.forEach((tipIdx, i) => {
-                    if (landmarks[tipIdx].y < landmarks[dips[i]].y) { // Y is inverted in some contexts? MediaPipe Y is 0 at top. So < means higher.
-                        fingersUp++;
-                    }
-                });
+                // Hassaslık azaltıldı, daha yumuşak
+                targetRotationY = (cx - 0.5) * 2; 
+                targetRotationX = (cy - 0.5) * 2;
 
-                // Check Thumb (X-axis based mostly)
-                // Compare thumb tip X to knuckle X. 
-                // Left vs Right hand handling is complex.
-                // Simple hack: Distance from index finger base (5)
-                const thumbTipDist = Math.hypot(landmarks[4].x - landmarks[5].x, landmarks[4].y - landmarks[5].y);
-                const thumbIpDist = Math.hypot(landmarks[3].x - landmarks[5].x, landmarks[3].y - landmarks[5].y);
-                if (thumbTipDist > thumbIpDist * 1.1) fingersUp++;
-
-                activeFingers = fingersUp;
-                updateUI(activeFingers);
-                setShapeFromFingers(activeFingers);
-
-                // 3. Calculate Scale (Pinch distance between 4 and 8)
+                // Pinch (Yakınlaştırma) Kontrolü (Başparmak ve İşaret)
                 const pinchDist = Math.hypot(landmarks[4].x - landmarks[8].x, landmarks[4].y - landmarks[8].y);
-                // Map pinch: 0.02 (close) to 0.5 (open) -> Scale 0.5 to 2.0
-                let rawScale = (pinchDist - 0.05) * 4;
-                handOpenness = Math.max(0.5, Math.min(2.5, 1 + rawScale));
+                shapeScale = 0.5 + (pinchDist * 4); // 0.5 ile 2.0 arası
                 
             } else {
                 isHandDetected = false;
-                // Slowly return to center/idle
-                handPosition.x *= 0.95;
-                handPosition.y *= 0.95;
+                // El yoksa yavaşça dönmeye devam et
+                targetRotationY += 0.002;
             }
         }
 
+        function updateShape(fingers) {
+            let nextShape = 'sphere';
+            // Parmak sayısı düzeltmeleri (bazen başparmak algılanmaz)
+            if (fingers === 0) nextShape = 'blackhole';
+            else if (fingers === 1) nextShape = 'heart';
+            else if (fingers === 2) nextShape = 'saturn';
+            else if (fingers === 3) nextShape = 'flower';
+            else if (fingers === 4) nextShape = 'helix';
+            else nextShape = 'sphere';
+
+            if (currentShape !== nextShape) {
+                currentShape = nextShape;
+                targetPositions = templates[nextShape];
+                
+                // UI Güncelle
+                document.querySelectorAll('.gesture-pill').forEach(el => {
+                    el.classList.remove('active');
+                    if(parseInt(el.dataset.fingers) === fingers) el.classList.add('active');
+                    // 5 ve üzeri hepsi küre
+                    if(fingers >= 5 && parseInt(el.dataset.fingers) === 5) el.classList.add('active');
+                });
+            }
+        }
+
+        // MediaPipe Başlatma
         const hands = new Hands({locateFile: (file) => {
             return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
         }});
         
         hands.setOptions({
             maxNumHands: 1,
-            modelComplexity: 1,
+            modelComplexity: isMobile ? 0 : 1, // 0 = Lite (Hızlı), 1 = Full
             minDetectionConfidence: 0.5,
             minTrackingConfidence: 0.5
         });
         
         hands.onResults(onResults);
 
+        // Kamera Başlatma
         const cameraUtils = new Camera(videoElement, {
             onFrame: async () => {
                 await hands.send({image: videoElement});
             },
-            width: 640,
-            height: 480
+            width: isMobile ? 320 : 640, // Mobilde düşük çözünürlük
+            height: isMobile ? 240 : 480
         });
         
-        // Start camera
-        cameraUtils.start().catch(err => {
-            console.error("Camera Error:", err);
-            document.querySelector('#loading h2').innerText = "Camera Access Denied";
+        cameraUtils.start().catch(e => {
+            document.querySelector('#loading h2').innerText = "Kamera Hatası";
+            document.querySelector('#loading p').innerText = "Lütfen izinleri kontrol edip yenileyin.";
         });
 
-        // --- Logic Integration ---
+        // Kullanıcıya kendi görüntüsünü göstermek için (ayna efekti)
+        const previewDiv = document.getElementById('cam-preview');
+        // Video elementini klonlamak yerine, stream'i yeni bir video elementine ata
+        const previewVideo = document.createElement('video');
+        previewVideo.muted = true;
+        previewVideo.autoplay = true;
+        previewVideo.playsInline = true;
+        previewDiv.appendChild(previewVideo);
         
-        function updateUI(count) {
-            document.querySelectorAll('.gesture-pill').forEach(el => {
-                el.classList.remove('active');
-                if (parseInt(el.dataset.fingers) === count) {
-                    el.classList.add('active');
-                }
-            });
-        }
+        // Asıl video başladığında stream'i al
+        videoElement.addEventListener('play', () => {
+            const stream = videoElement.captureStream ? videoElement.captureStream() : videoElement.srcObject;
+            if(stream) previewVideo.srcObject = stream;
+            else if(videoElement.srcObject) previewVideo.srcObject = videoElement.srcObject;
+        });
 
-        function setShapeFromFingers(count) {
-            switch(count) {
-                case 0: setShape('blackhole'); break;
-                case 1: setShape('heart'); break;
-                case 2: setShape('saturn'); break;
-                case 3: setShape('flower'); break;
-                case 4: setShape('helix'); break;
-                default: setShape('sphere'); break; // 5 or weird states
-            }
-        }
 
-        function setShape(shapeName) {
-            if (currentShape !== shapeName) {
-                currentShape = shapeName;
-                // Set global target reference
-                targetPositions = templates[shapeName];
-            }
-        }
-
-        // --- Animation Loop ---
-        let time = 0;
+        // --- Animasyon Döngüsü ---
+        const clock = new THREE.Clock();
         
         function animate() {
             requestAnimationFrame(animate);
-            time += 0.01;
+            
+            const delta = clock.getDelta();
+            const time = clock.getElapsedTime();
+
+            // Rotasyon Yumuşatma (Lerp)
+            rotationX += (targetRotationX - rotationX) * 0.1;
+            rotationY += (targetRotationY - rotationY) * 0.1;
+            
+            particles.rotation.x = rotationX;
+            particles.rotation.y = rotationY;
+
+            // Renk Hedefleri
+            let tr, tg, tb;
+            switch(currentShape) {
+                case 'heart': tr=1; tg=0.1; tb=0.3; break; // Kırmızı
+                case 'saturn': tr=1; tg=0.8; tb=0.2; break; // Sarı
+                case 'flower': tr=1; tg=0.2; tb=1; break; // Pembe
+                case 'helix': tr=0; tg=1; tb=0.5; break; // Yeşil/Turkuaz
+                case 'blackhole': tr=0.5; tg=0; tb=0; break; // Koyu Kırmızı
+                default: tr=0.2; tg=0.5; tb=1; break; // Mavi
+            }
 
             const positionsAttribute = geometry.attributes.position;
             const colorsAttribute = geometry.attributes.color;
-            const posArray = positionsAttribute.array;
-            const colArray = colorsAttribute.array;
+            const posArr = positionsAttribute.array;
+            const colArr = colorsAttribute.array;
 
-            // Rotation of the entire particle system based on hand X/Y
-            // We rotate the container or the calculation? Let's rotate the calculation offset.
-            // Actually, simplest is to rotate the mesh object.
-            particles.rotation.y += 0.002; // Idle spin
+            // Morf Efekti (Performans için döngüyü basit tut)
+            // Eğer mobildeysek her frame'de güncelleme yapmak zorlayabilir mi? 
+            // 5000 parçacık modern telefonlarda sorun olmaz.
             
-            // Lerp mesh rotation towards hand position
-            if (isHandDetected) {
-                const targetRotX = handPosition.y * 0.05;
-                const targetRotY = handPosition.x * 0.05;
-                particles.rotation.x += (targetRotX - particles.rotation.x) * 0.1;
-                particles.rotation.y += (targetRotY - particles.rotation.y) * 0.1;
-            }
-
-            // Colors based on shape
-            let rT, gT, bT;
-            if (currentShape === 'heart') { rT=1; gT=0.2; bT=0.4; }
-            else if (currentShape === 'saturn') { rT=1; gT=0.8; bT=0.2; }
-            else if (currentShape === 'flower') { rT=1; gT=0.4; bT=1; }
-            else if (currentShape === 'helix') { rT=0.2; gT=1; bT=0.5; }
-            else if (currentShape === 'blackhole') { rT=0.8; gT=0.1; bT=0.1; } // Redshift
-            else { rT=0.2; gT=0.6; bT=1.0; } // Sphere Blue
+            const lerpFactor = isMobile ? 0.08 : 0.05;
 
             for (let i = 0; i < PARTICLE_COUNT; i++) {
                 const ix = i * 3;
-                const iy = i * 3 + 1;
-                const iz = i * 3 + 2;
-
-                // 1. Get Target Position
-                let tx = targetPositions[ix];
-                let ty = targetPositions[iy];
-                let tz = targetPositions[iz];
-
-                // 2. Apply "Explosion" or "Noise" if scale is high or changing
-                // Simple Morphing: Lerp current to target
-                // Speed depends on index
-                const lerpSpeed = 0.03 + (Math.random() * 0.02);
-
-                // Apply Hand Scale (Pinch)
-                tx *= handOpenness;
-                ty *= handOpenness;
-                tz *= handOpenness;
                 
-                // Add subtle idle noise
-                if (currentShape !== 'blackhole') {
-                    tx += Math.sin(time + i) * 0.05;
-                    ty += Math.cos(time + i * 0.5) * 0.05;
+                // Hedef Pozisyon
+                let tx = targetPositions[ix] * shapeScale;
+                let ty = targetPositions[ix+1] * shapeScale;
+                let tz = targetPositions[ix+2] * shapeScale;
+
+                // Hafif dalgalanma (Sadece küre veya çiçekte)
+                if (currentShape !== 'blackhole' && !isMobile) {
+                    tx += Math.sin(time + i) * 0.1;
                 }
 
-                posArray[ix] += (tx - posArray[ix]) * lerpSpeed;
-                posArray[iy] += (ty - posArray[iy]) * lerpSpeed;
-                posArray[iz] += (tz - posArray[iz]) * lerpSpeed;
+                // Pozisyon güncelleme
+                posArr[ix] += (tx - posArr[ix]) * lerpFactor;
+                posArr[ix+1] += (ty - posArr[ix+1]) * lerpFactor;
+                posArr[ix+2] += (tz - posArr[ix+2]) * lerpFactor;
 
-                // Color Morphing
-                colArray[ix] += (rT - colArray[ix]) * 0.05;
-                colArray[iy] += (gT - colArray[iy]) * 0.05;
-                colArray[iz] += (bT - colArray[iz]) * 0.05;
-                
-                // Twinkle effect
-                if (Math.random() > 0.98) {
-                    colArray[ix] = 1; colArray[iy] = 1; colArray[iz] = 1;
-                }
+                // Renk güncelleme
+                colArr[ix] += (tr - colArr[ix]) * 0.03;
+                colArr[ix+1] += (tg - colArr[ix+1]) * 0.03;
+                colArr[ix+2] += (tb - colArr[ix+2]) * 0.03;
             }
 
             positionsAttribute.needsUpdate = true;
@@ -515,11 +461,17 @@
             renderer.render(scene, camera);
         }
 
-        // Handle resize
+        // Ekran boyutu değişirse
         window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            camera.aspect = width / height;
+            
+            // Dikey ekranda kamerayı uzaklaştır
+            camera.position.z = width < height ? 55 : 40;
+            
             camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setSize(width, height);
         });
 
         animate();
@@ -527,5 +479,6 @@
     </script>
 </body>
 </html>
+
 
 
